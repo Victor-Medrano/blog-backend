@@ -1,8 +1,9 @@
 
 
-from typing import Optional
+from math import ceil
+from typing import List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.post import PostORM
@@ -20,7 +21,39 @@ class PostRepository:
         query = (select(PostORM).where(PostORM.slug == slug))
         return self.db.execute(query).scalar_one_or_none()
 
-    # search
+    def search(
+        self,
+        query,
+        order_by,
+        direction,
+        page,
+        per_page
+    ) -> Tuple[int, List[PostORM]]:
+
+        results = select(PostORM)
+
+        if query:
+            query = results.where(PostORM.title.ilike(f"%{query}%"))
+
+        total = self.db.scalar(
+            select(func.count()).select_from(results.subquery())) or 0
+
+        if total == 0:
+            return 0, []
+
+        current_page = min(page, max(1, ceil(total/per_page)))
+
+        order_col = PostORM.id if order_by == "id" else func.lower(
+            PostORM.title)
+
+        results = results.order_by(
+            order_col.asc() if direction == "asc" else order_col.desc())
+
+        start = (current_page - 1) * per_page
+        items = self.db.execute(results.limit(
+            per_page).offset(start)).scalars().all()
+
+        return total, items
 
     def create_post(self, title: str, content: str) -> PostORM:
 
@@ -30,5 +63,10 @@ class PostRepository:
         self.db.refresh(post)
         return post
 
-    # update
-    # delete
+    def update_post(self, post: PostORM, update: dict) -> PostORM:
+        for key, value in update.items():
+            setattr(post, key, value)
+        return post
+
+    def delete_post(self, post: PostORM) -> None:
+        self.db.delete(post)
